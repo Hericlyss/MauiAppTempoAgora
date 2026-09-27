@@ -1,54 +1,59 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
+﻿using System.Net;
+using System.Text.Json;
 using MauiAppTempoAgora.Models;
-using Newtonsoft.Json.Linq;
 
 namespace MauiAppTempoAgora.Services
 {
     public class DataService
     {
+        private static readonly HttpClient client = new HttpClient();
+        private const string ApiKey = "dadcbf315d5fa56968ca453c21945c04"; // Coloque sua chave do OpenWeather
+
         public static async Task<Tempo?> GetPrevisao(string cidade)
         {
-            Tempo? t = null;
+            string url = $"https://api.openweathermap.org/data/2.5/weather?q={cidade}&units=metric&appid={ApiKey}&lang=pt_br";
 
-            string chave = "dadcbf315d5fa56968ca453c21945c04";
+            HttpResponseMessage response = await client.GetAsync(url);
 
-            string url = $"https://api.openweathermap.org/data/2.5/weather?" +
-                         $"q={cidade}&units=metric&appid={chave}";
-
-            using (HttpClient client = new HttpClient())
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                HttpResponseMessage resp = await client.GetAsync(url);
+                throw new Exception("ChaveInvalida");
+            }
 
-                if (resp.IsSuccessStatusCode)
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new Exception("CidadeNaoEncontrada");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Exception($"Erro na requisição: {response.ReasonPhrase}");
+            }
+
+            string json = await response.Content.ReadAsStringAsync();
+
+            // Mapeando diretamente do JSON para evitar incompatibilidade de tipos
+            using (JsonDocument doc = JsonDocument.Parse(json))
+            {
+                var root = doc.RootElement;
+
+                Tempo tempo = new Tempo
                 {
-                    string json = await resp.Content.ReadAsStringAsync();
+                    lat = root.GetProperty("coord").GetProperty("lat").GetDouble(),
+                    lon = root.GetProperty("coord").GetProperty("lon").GetDouble(),
+                    description = root.GetProperty("weather")[0].GetProperty("description").GetString(),
+                    temp_min = root.GetProperty("main").GetProperty("temp_min").GetDouble(),
+                    temp_max = root.GetProperty("main").GetProperty("temp_max").GetDouble(),
+                    speed = root.GetProperty("wind").GetProperty("speed").GetDouble(),
+                    visibility = root.GetProperty("visibility").GetInt32(),
 
-                    var rascunho = JObject.Parse(json);
+                    // Converte Unix Timestamp para Hora/Minuto legível
+                    sunrise = DateTimeOffset.FromUnixTimeSeconds(root.GetProperty("sys").GetProperty("sunrise").GetInt64()).ToLocalTime().ToString("HH:mm"),
+                    sunset = DateTimeOffset.FromUnixTimeSeconds(root.GetProperty("sys").GetProperty("sunset").GetInt64()).ToLocalTime().ToString("HH:mm")
+                };
 
-                    DateTime time = new();
-                    DateTime sunrise = time.AddSeconds((double)rascunho["sys"]["sunrise"]).ToLocalTime();
-                    DateTime sunset = time.AddSeconds((double)rascunho["sys"]["sunset"]).ToLocalTime();
-
-                    t = new()
-                    {
-                        lat = (double)rascunho["coord"]["lat"],
-                        lon = (double)rascunho["coord"]["lon"],
-                        description = (string)rascunho["weather"][0]["description"],
-                        main = (string)rascunho["weather"][0]["main"],
-                        temp_min = (double)rascunho["main"]["temp_min"],
-                        temp_max = (double)rascunho["main"]["temp_max"],
-                        speed = (double)rascunho["wind"]["speed"],
-                        visibility = (int)rascunho["visibility"],
-                        sunrise = sunrise.ToString(),
-                        sunset = sunset.ToString(),
-                    }; // Fecha obj do Tempo.
-                } // Fecha if se o status do servidor foi de sucesso
-            } // fecha laço using
-
-            return t;
+                return tempo;
+            }
         }
     }
 }
